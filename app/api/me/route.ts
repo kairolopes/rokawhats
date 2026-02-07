@@ -11,7 +11,7 @@ export async function GET(req: Request) {
   if (!userId) return NextResponse.json({ error: 'invalid_token' }, { status: 401 })
   const s = createClient(process.env.SUPABASE_URL as string, process.env.SUPABASE_SERVICE_ROLE_KEY as string)
   const { data, error } = await getProfileByUserId(s, userId)
-  if (error) return NextResponse.json({ error: 'profile_not_found' }, { status: 404 })
+  if (error || !data) return NextResponse.json({ error: 'profile_not_found' }, { status: 404 })
   return NextResponse.json({
     id: data.user_id,
     name: data.name,
