@@ -112,6 +112,47 @@ export async function POST(req: Request) {
             }
           }
         }
+        if (!buffer) {
+          try {
+            const idx = base.indexOf('/contacts')
+            if (idx > -1) {
+              const root = base.slice(0, idx + '/contacts'.length)
+              const urlQuery = `${root}/profile-picture?phone=${contactPhone}`
+              const urlPath = `${root}/${contactPhone}/profile-picture`
+              const candidates = [urlQuery, urlPath]
+              for (const candidate of candidates) {
+                let r = await fetch(candidate, { headers })
+                if (!r.ok && clientToken) {
+                  const withToken2 = candidate.includes('?')
+                    ? `${candidate}&client_token=${clientToken}`
+                    : `${candidate}?client_token=${clientToken}`
+                  r = await fetch(withToken2)
+                }
+                if (r.ok) {
+                  const ct2 = r.headers.get('content-type') || ''
+                  if (ct2.startsWith('image/')) {
+                    const arr2 = await r.arrayBuffer()
+                    buffer = Buffer.from(arr2)
+                    contentType = ct2 || contentType
+                    break
+                  } else {
+                    const jj = await r.json().catch(() => null as any)
+                    const pic2 = jj?.profilePicUrl || jj?.avatarUrl || jj?.url || null
+                    if (pic2) {
+                      const r3 = await fetch(pic2)
+                      if (r3.ok) {
+                        const arr3 = await r3.arrayBuffer()
+                        buffer = Buffer.from(arr3)
+                        contentType = r3.headers.get('content-type') || contentType
+                        break
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          } catch {}
+        }
       }
     } catch (e: any) {
       await logWebhook({
