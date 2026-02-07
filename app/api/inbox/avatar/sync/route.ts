@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     })
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
-  if (!workspaceId || !contactPhone || !avatarUrl) {
+  if (!workspaceId || !contactPhone) {
     await logWebhook({
       workspaceId,
       route: '/api/inbox/avatar/sync',
@@ -32,32 +32,82 @@ export async function POST(req: Request) {
 
   await ensureBuckets()
 
-  let buffer: Buffer
+  let buffer: Buffer | null = null
   let contentType = 'image/jpeg'
-  try {
-    const res = await fetch(avatarUrl)
-    if (!res.ok) {
+  if (avatarUrl) {
+    try {
+      const res = await fetch(avatarUrl)
+      if (!res.ok) {
+        await logWebhook({
+          workspaceId,
+          route: '/api/inbox/avatar/sync',
+          status: 'error',
+          error: `download_failed status=${res.status}`,
+          payload: { avatarUrl },
+        })
+        return NextResponse.json({ error: 'download_failed' }, { status: 502 })
+      }
+      const arr = await res.arrayBuffer()
+      buffer = Buffer.from(arr)
+      contentType = res.headers.get('content-type') || contentType
+    } catch (e: any) {
       await logWebhook({
         workspaceId,
         route: '/api/inbox/avatar/sync',
         status: 'error',
-        error: `download_failed status=${res.status}`,
+        error: e?.message || 'download_error',
         payload: { avatarUrl },
       })
-      return NextResponse.json({ error: 'download_failed' }, { status: 502 })
+      return NextResponse.json({ error: 'download_error' }, { status: 502 })
     }
-    const arr = await res.arrayBuffer()
-    buffer = Buffer.from(arr)
-    contentType = res.headers.get('content-type') || contentType
-  } catch (e: any) {
-    await logWebhook({
-      workspaceId,
-      route: '/api/inbox/avatar/sync',
-      status: 'error',
-      error: e?.message || 'download_error',
-      payload: { avatarUrl },
-    })
-    return NextResponse.json({ error: 'download_error' }, { status: 502 })
+  } else {
+    try {
+      const tmpl = process.env.ZAPI_AVATAR_URL_TEMPLATE as string | undefined
+      const clientToken = process.env.ZAPI_CLIENT_TOKEN as string | undefined
+      if (tmpl) {
+        const url = tmpl.replace('{PHONE}', contactPhone)
+        const headers: Record<string, string> = {}
+        if (clientToken) headers['client-token'] = clientToken
+        const res = await fetch(url, { headers })
+        if (res.ok) {
+          const ct = res.headers.get('content-type') || ''
+          if (ct.startsWith('image/')) {
+            const arr = await res.arrayBuffer()
+            buffer = Buffer.from(arr)
+            contentType = ct || contentType
+          } else {
+            const j = await res.json().catch(() => null as any)
+            const pic = j?.profilePicUrl || j?.avatarUrl || j?.url || null
+            if (pic) {
+              const r2 = await fetch(pic)
+              if (r2.ok) {
+                const arr2 = await r2.arrayBuffer()
+                buffer = Buffer.from(arr2)
+                contentType = r2.headers.get('content-type') || contentType
+              }
+            }
+          }
+        }
+      }
+    } catch (e: any) {
+      await logWebhook({
+        workspaceId,
+        route: '/api/inbox/avatar/sync',
+        status: 'error',
+        error: e?.message || 'fallback_error',
+        payload: { contactPhone },
+      })
+    }
+    if (!buffer) {
+      await logWebhook({
+        workspaceId,
+        route: '/api/inbox/avatar/sync',
+        status: 'skipped',
+        error: 'no_avatar',
+        payload: body,
+      })
+      return NextResponse.json({ ok: true, skipped: true }, { status: 200 })
+    }
   }
 
   const path = `avatars/${workspaceId}/contacts/${contactPhone}.jpg`
