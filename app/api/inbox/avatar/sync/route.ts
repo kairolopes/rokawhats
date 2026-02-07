@@ -65,10 +65,10 @@ export async function POST(req: Request) {
       const tmpl = process.env.ZAPI_AVATAR_URL_TEMPLATE as string | undefined
       const clientToken = process.env.ZAPI_CLIENT_TOKEN as string | undefined
       if (tmpl) {
-        const url = tmpl.replace('{PHONE}', contactPhone)
+        const base = tmpl.replace('{PHONE}', contactPhone)
         const headers: Record<string, string> = {}
         if (clientToken) headers['client-token'] = clientToken
-        const res = await fetch(url, { headers })
+        let res = await fetch(base, { headers })
         if (res.ok) {
           const ct = res.headers.get('content-type') || ''
           if (ct.startsWith('image/')) {
@@ -84,6 +84,30 @@ export async function POST(req: Request) {
                 const arr2 = await r2.arrayBuffer()
                 buffer = Buffer.from(arr2)
                 contentType = r2.headers.get('content-type') || contentType
+              }
+            }
+          }
+        } else if (clientToken) {
+          const withToken = base.includes('?')
+            ? `${base}&client_token=${clientToken}`
+            : `${base}?client_token=${clientToken}`
+          res = await fetch(withToken)
+          if (res.ok) {
+            const ct = res.headers.get('content-type') || ''
+            if (ct.startsWith('image/')) {
+              const arr = await res.arrayBuffer()
+              buffer = Buffer.from(arr)
+              contentType = ct || contentType
+            } else {
+              const j = await res.json().catch(() => null as any)
+              const pic = j?.profilePicUrl || j?.avatarUrl || j?.url || null
+              if (pic) {
+                const r2 = await fetch(pic)
+                if (r2.ok) {
+                  const arr2 = await r2.arrayBuffer()
+                  buffer = Buffer.from(arr2)
+                  contentType = r2.headers.get('content-type') || contentType
+                }
               }
             }
           }
